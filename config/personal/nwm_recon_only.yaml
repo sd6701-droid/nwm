@@ -1,8 +1,9 @@
 run_name: nwm_cdit_xl
 results_dir: logs
 train: True
-batch_size: 16
+batch_size: 4
 num_workers: 12
+prefetch_factor: 4
 model: CDiT-XL/2
 lr: 8e-5
 
@@ -26,7 +27,7 @@ datasets:
     data_folder: data/recon
     train: data_splits/recon/train/ # path to train folder with traj_names.txt
     test: data_splits/recon/test/ # path to test folder with traj_names.txt
-    goals_per_obs: 4
+    goals_per_obs: 2
 
 # Weights & Biases logging (rank-0 only). Set enabled: False to turn off.
 wandb:

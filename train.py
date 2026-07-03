@@ -270,17 +270,20 @@ def main(args):
         shuffle=True,
         seed=args.global_seed
     )
-    loader = DataLoader(
-        train_dataset,
+    loader_kwargs = dict(
         batch_size=config['batch_size'],
         shuffle=False,
         sampler=sampler,
         num_workers=config['num_workers'],
         pin_memory=True,
         drop_last=True,
-        persistent_workers=True
     )
-    logger.info(f"Dataset contains {len(train_dataset):,} images")
+    # prefetch_factor / persistent_workers are only valid with worker processes
+    if config['num_workers'] > 0:
+        loader_kwargs['persistent_workers'] = True
+        loader_kwargs['prefetch_factor'] = config.get('prefetch_factor', 4)
+    loader = DataLoader(train_dataset, **loader_kwargs)
+    logger.info(f"Dataset contains {len(train_dataset):,} samples")
 
     # Prepare models for training:
     model.train()  # important! This enables embedding dropout for classifier-free guidance
