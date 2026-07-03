@@ -20,10 +20,16 @@ from collections import OrderedDict
 from copy import deepcopy
 from time import time
 import argparse
+import glob
 import logging
 import os
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
 import yaml
+
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 
 import torch.distributed as dist
@@ -115,10 +121,32 @@ def main(args):
     os.makedirs(config['results_dir'], exist_ok=True)  # Make results folder (holds all experiment subfolders)
     experiment_dir = f"{config['results_dir']}/{config['run_name']}"  # Create an experiment folder
     checkpoint_dir = f"{experiment_dir}/checkpoints"  # Stores saved model checkpoints
+    # Resolve wandb settings: config `wandb:` block is the source of truth,
+    # CLI flags (--wandb / --wandb-project / --wandb-entity) override it when set.
+    wandb_cfg = config.get("wandb", {}) or {}
+    wandb_on = bool(args.wandb) or bool(wandb_cfg.get("enabled", False))
+    wandb_project = args.wandb_project or wandb_cfg.get("project", "nwm")
+    wandb_entity = args.wandb_entity or wandb_cfg.get("entity", None)
+    wandb_run_name = wandb_cfg.get("name", config["run_name"])
+
+    wandb_enabled = False
     if rank == 0:
         os.makedirs(checkpoint_dir, exist_ok=True)
         logger = create_logger(experiment_dir)
         logger.info(f"Experiment directory created at {experiment_dir}")
+        if wandb_on:
+            if wandb is None:
+                logger.info("wandb requested but not installed; skipping. Run `pip install wandb`.")
+            else:
+                wandb.init(
+                    project=wandb_project,
+                    entity=wandb_entity,
+                    name=wandb_run_name,
+                    dir=experiment_dir,
+                    config={**config, **vars(args)},
+                )
+                wandb_enabled = True
+                logger.info(f"wandb logging to project '{wandb_project}'")
     else:
         logger = create_logger(None)
 
@@ -321,6 +349,13 @@ def main(args):
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                 avg_loss = avg_loss.item() / dist.get_world_size()
                 logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}, Samples/Sec: {samples_per_sec:.2f}")
+                if wandb_enabled:
+                    wandb.log({
+                        "train/loss": avg_loss,
+                        "train/steps_per_sec": steps_per_sec,
+                        "train/samples_per_sec": samples_per_sec,
+                        "train/epoch": epoch,
+                    }, step=train_steps)
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
@@ -354,11 +389,23 @@ def main(args):
                 eval_end_time = time()
                 eval_time = eval_end_time - eval_start_time
                 logger.info(f"(step={train_steps:07d}) Perceptual Loss: {sim_score:.4f}, Eval Time: {eval_time:.2f}")
+                if wandb_enabled:
+                    log_dict = {
+                        "eval/perceptual_loss": float(sim_score),
+                        "eval/time": eval_time,
+                    }
+                    sample_pngs = sorted(glob.glob(os.path.join(save_dir, "*.png")))
+                    if sample_pngs:
+                        # each PNG is [context | ground-truth | prediction]
+                        log_dict["eval/samples"] = [wandb.Image(p) for p in sample_pngs[:8]]
+                    wandb.log(log_dict, step=train_steps)
 
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
 
     logger.info("Done!")
+    if wandb_enabled:
+        wandb.finish()
     cleanup()
 
 
@@ -430,6 +477,9 @@ def get_args_parser():
     parser.add_argument("--eval-every", type=int, default=5000)
     parser.add_argument("--bfloat16", type=int, default=1)
     parser.add_argument("--torch-compile", type=int, default=1)
+    parser.add_argument("--wandb", type=int, default=0, help="1 to force-enable W&B logging (else uses config `wandb.enabled`)")
+    parser.add_argument("--wandb-project", type=str, default=None, help="override config `wandb.project`")
+    parser.add_argument("--wandb-entity", type=str, default=None, help="override config `wandb.entity`; None uses your default")
     return parser
 
 if __name__ == "__main__":
