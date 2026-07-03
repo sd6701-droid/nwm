@@ -27,3 +27,10 @@ datasets:
     train: data_splits/recon/train/ # path to train folder with traj_names.txt
     test: data_splits/recon/test/ # path to test folder with traj_names.txt
     goals_per_obs: 4
+
+# Weights & Biases logging (rank-0 only). Set enabled: False to turn off.
+wandb:
+  enabled: True
+  project: nwm-recon
+  entity: null   # your wandb team/user, or null for your default
+  name: null     # run name; null falls back to run_name above
