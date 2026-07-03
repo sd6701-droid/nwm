@@ -4,7 +4,7 @@ train: True
 batch_size: 4
 num_workers: 12
 prefetch_factor: 4
-model: CDiT-XL/2
+model: CDiT-S/2
 lr: 8e-5
 
 # normalization for the action space
